@@ -1,0 +1,4 @@
+[submodule "ext/m4c0-stl"]
+	path = ext/m4c0-stl
+	url = https://github.com/m4c0/m4c0-stl.git
+	shallow = true
