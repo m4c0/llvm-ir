@@ -14,9 +14,15 @@ find_library(LLVM LLVM HINTS ${LLVM_LIBRARY_DIR} REQUIRED)
 add_executable(brainf brainf.cpp)
 target_compile_features(brainf PRIVATE cxx_std_20)
 target_include_directories(brainf PRIVATE 
+  ../ext/m4c0-stl/core/inc
   ../ext/m4c0-stl/parser/inc
   inc
   ${LLVM_INCLUDE_DIR}
   )
 target_link_libraries(brainf PRIVATE ${CLANG} ${CLANGPP} ${LLVM})
+
+add_executable(handcrafted handcrafted.cpp)
+target_compile_features(handcrafted PRIVATE cxx_std_20)
+target_include_directories(handcrafted PRIVATE ${LLVM_INCLUDE_DIR})
+target_link_libraries(handcrafted PRIVATE ${CLANG} ${CLANGPP} ${LLVM})
 
