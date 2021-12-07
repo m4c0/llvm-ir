@@ -25,44 +25,40 @@ class bf_ops {
   llvm::IRBuilder<> *m_builder;
   bf_globals m_globals;
   llvm::Value *m_data;
+  llvm::Value *m_ptr;
 
 public:
-  bf_ops(llvm::IRBuilder<> *b, bf_globals g, llvm::Value *d)
-      : m_builder(b), m_globals(g), m_data(d) {}
+  bf_ops(llvm::IRBuilder<> *b, bf_globals g, llvm::Value *d, llvm::Value *p)
+      : m_builder(b), m_globals(g), m_data(d), m_ptr(p) {}
 
-  [[nodiscard]] auto load_data(auto ptr) {
-    auto gep = m_builder->CreateInBoundsGEP(m_data, {m_globals.zero, ptr});
+  [[nodiscard]] auto load_data() const {
+    auto gep = m_builder->CreateInBoundsGEP(m_data, {m_globals.zero, m_ptr});
     return m_builder->CreateLoad(gep);
   }
-  void store_data(auto ptr, auto v) {
-    auto gep = m_builder->CreateInBoundsGEP(m_data, {m_globals.zero, ptr});
+  void store_data(auto v) {
+    auto gep = m_builder->CreateInBoundsGEP(m_data, {m_globals.zero, m_ptr});
     m_builder->CreateStore(v, gep);
   }
 
-  void plus(auto ptr) {
-    store_data(ptr, m_builder->CreateAdd(load_data(ptr), m_globals.one));
-  }
-  void minus(auto ptr) {
-    store_data(ptr, m_builder->CreateSub(load_data(ptr), m_globals.one));
+  void plus() { store_data(m_builder->CreateAdd(load_data(), m_globals.one)); }
+  void minus() { store_data(m_builder->CreateSub(load_data(), m_globals.one)); }
+
+  void inc() { m_ptr = m_builder->CreateAdd(m_ptr, m_globals.one); }
+  void dec() { m_ptr = m_builder->CreateSub(m_ptr, m_globals.one); }
+
+  void in() { store_data(m_builder->CreateCall(m_globals.getchar)); }
+  void out() { m_builder->CreateCall(m_globals.putchar, {load_data()}); }
+
+  void loop(auto blk) {
+    m_ptr = m_builder->CreateCall(create_block_loop(m_globals, blk),
+                                  {m_data, m_ptr});
   }
 
-  [[nodiscard]] auto inc(auto ptr) {
-    return m_builder->CreateAdd(ptr, m_globals.one);
-  }
-  [[nodiscard]] auto dec(auto ptr) {
-    return m_builder->CreateSub(ptr, m_globals.one);
-  }
-
-  void in(auto ptr) {
-    store_data(ptr, m_builder->CreateCall(m_globals.getchar));
-  }
-  void out(auto ptr) {
-    m_builder->CreateCall(m_globals.putchar, {load_data(ptr)});
-  }
-
-  auto loop(auto ptr, auto blk) {
-    return m_builder->CreateCall(create_block_loop(m_globals, blk),
-                                 {m_data, ptr});
+  void create_ret() const { m_builder->CreateRet(m_ptr); }
+  void create_icmp(llvm::BasicBlock *t, llvm::BasicBlock *f) const {
+    auto cmp = m_builder->CreateICmp(llvm::CmpInst::Predicate::ICMP_EQ,
+                                     load_data(), m_globals.zero);
+    m_builder->CreateCondBr(cmp, t, f);
   }
 };
 
@@ -80,8 +76,9 @@ static auto create_block(const bf_globals &g, auto blk) {
   llvm::IRBuilder<> builder{*g.ctx};
   builder.SetInsertPoint(llvm::BasicBlock::Create(*g.ctx, "entry", fn));
 
-  const bf_ops ops{&builder, g, data};
-  builder.CreateRet(blk(ops, ptr));
+  const bf_ops ops{&builder, g, data, ptr};
+  blk(ops);
+  ops.create_ret();
 
   return fn;
 }
@@ -105,10 +102,7 @@ static auto create_block_loop(const bf_globals &g, auto blk) {
   llvm::IRBuilder<> builder{*g.ctx};
 
   builder.SetInsertPoint(entry);
-  bf_ops ops{&builder, g, data};
-  auto cmp = builder.CreateICmp(llvm::CmpInst::Predicate::ICMP_EQ,
-                                ops.load_data(ptr), g.zero);
-  builder.CreateCondBr(cmp, exit, header);
+  bf_ops(&builder, g, data, ptr).create_icmp(exit, header);
 
   builder.SetInsertPoint(header);
   auto h_ptr = builder.CreatePHI(g.i32, 2);
@@ -121,10 +115,7 @@ static auto create_block_loop(const bf_globals &g, auto blk) {
   h_ptr->addIncoming(b_ptr, body);
 
   builder.SetInsertPoint(header);
-
-  cmp = builder.CreateICmp(llvm::CmpInst::Predicate::ICMP_EQ,
-                           ops.load_data(h_ptr), g.zero);
-  builder.CreateCondBr(cmp, exit, body);
+  bf_ops(&builder, g, data, ptr).create_icmp(exit, body);
 
   builder.SetInsertPoint(exit);
   auto x_phi = builder.CreatePHI(g.i32, 2);
@@ -174,46 +165,43 @@ int main() {
                .one = one,
                .getchar = getchar,
                .putchar = putchar};
-  bf_ops ops{&builder, g, data};
+  bf_ops ops{&builder, g, data, zero};
 
   // ++++
   for (auto i = 0; i < 4; i++) {
-    ops.plus(ptr);
+    ops.plus();
   }
 
   // [>++++++++<-]
-  ptr = ops.loop(ptr, [](bf_ops ops, auto b_ptr) {
-    b_ptr = ops.inc(b_ptr);
+  ops.loop([](bf_ops ops) {
+    ops.inc();
     for (auto i = 0; i < 8; i++) {
-      ops.plus(b_ptr);
+      ops.plus();
     }
-    b_ptr = ops.dec(b_ptr);
-    ops.minus(b_ptr);
-    return b_ptr;
+    ops.dec();
+    ops.minus();
   });
 
   // ,
-  ops.store_data(ptr, builder.CreateCall(getchar));
+  ops.store_data(builder.CreateCall(getchar));
 
   // [[>+.-<-]>.<,]
-  ptr = ops.loop(ptr, [](bf_ops ops, auto b_ptr_outer) {
-    b_ptr_outer = ops.loop(b_ptr_outer, [](bf_ops ops, auto b_ptr) {
+  ops.loop([](bf_ops ops) {
+    ops.loop([](bf_ops ops) {
       // [>+.-<-]
-      b_ptr = ops.inc(b_ptr);
-      ops.plus(b_ptr);
-      ops.out(b_ptr);
-      ops.minus(b_ptr);
-      b_ptr = ops.dec(b_ptr);
-      ops.minus(b_ptr);
-      return b_ptr;
+      ops.inc();
+      ops.plus();
+      ops.out();
+      ops.minus();
+      ops.dec();
+      ops.minus();
     });
 
     // >.<,
-    b_ptr_outer = ops.inc(b_ptr_outer);
-    ops.out(b_ptr_outer);
-    b_ptr_outer = ops.dec(b_ptr_outer);
-    ops.in(b_ptr_outer);
-    return b_ptr_outer;
+    ops.inc();
+    ops.out();
+    ops.dec();
+    ops.in();
   });
 
   builder.CreateRet(zero);
