@@ -17,50 +17,65 @@ struct bf_globals {
   llvm::Value *one;
   llvm::FunctionCallee getchar;
   llvm::FunctionCallee putchar;
+  llvm::Function *main;
 };
 
 static auto create_block_loop(const bf_globals &g, auto blk);
 
 class bf_ops {
-  llvm::IRBuilder<> *m_builder;
   bf_globals m_globals;
+  llvm::IRBuilder<> m_builder;
   llvm::Value *m_data;
   llvm::Value *m_ptr;
 
-public:
-  bf_ops(llvm::IRBuilder<> *b, bf_globals g, llvm::Value *d, llvm::Value *p)
-      : m_builder(b), m_globals(g), m_data(d), m_ptr(p) {}
+  static auto create_data(bf_globals g, llvm::IRBuilder<> *b) {
+    b->SetInsertPoint(llvm::BasicBlock::Create(*g.ctx, "entry", g.main));
+    auto data = b->CreateAlloca(g.data_tp, nullptr, "data");
+    auto data_init = llvm::ConstantAggregateZero::get(g.data_tp);
+    b->CreateStore(data_init, data);
+    return data;
+  }
 
-  [[nodiscard]] auto load_data() const {
-    auto gep = m_builder->CreateInBoundsGEP(m_data, {m_globals.zero, m_ptr});
-    return m_builder->CreateLoad(gep);
+public:
+  explicit bf_ops(bf_globals g)
+      : m_globals(g), m_builder(*g.ctx), m_data(create_data(g, &m_builder)),
+        m_ptr(g.zero) {}
+  bf_ops(bf_globals g, llvm::BasicBlock *b, llvm::Value *d, llvm::Value *p)
+      : m_globals(g), m_builder(*g.ctx), m_data(d), m_ptr(p) {
+    m_builder.SetInsertPoint(b);
+  }
+
+  [[nodiscard]] auto load_data() {
+    auto gep = m_builder.CreateInBoundsGEP(m_data, {m_globals.zero, m_ptr});
+    return m_builder.CreateLoad(gep);
   }
   void store_data(auto v) {
-    auto gep = m_builder->CreateInBoundsGEP(m_data, {m_globals.zero, m_ptr});
-    m_builder->CreateStore(v, gep);
+    auto gep = m_builder.CreateInBoundsGEP(m_data, {m_globals.zero, m_ptr});
+    m_builder.CreateStore(v, gep);
   }
 
-  void plus() { store_data(m_builder->CreateAdd(load_data(), m_globals.one)); }
-  void minus() { store_data(m_builder->CreateSub(load_data(), m_globals.one)); }
+  void plus() { store_data(m_builder.CreateAdd(load_data(), m_globals.one)); }
+  void minus() { store_data(m_builder.CreateSub(load_data(), m_globals.one)); }
 
-  void inc() { m_ptr = m_builder->CreateAdd(m_ptr, m_globals.one); }
-  void dec() { m_ptr = m_builder->CreateSub(m_ptr, m_globals.one); }
+  void inc() { m_ptr = m_builder.CreateAdd(m_ptr, m_globals.one); }
+  void dec() { m_ptr = m_builder.CreateSub(m_ptr, m_globals.one); }
 
-  void in() { store_data(m_builder->CreateCall(m_globals.getchar)); }
-  void out() { m_builder->CreateCall(m_globals.putchar, {load_data()}); }
+  void in() { store_data(m_builder.CreateCall(m_globals.getchar)); }
+  void out() { m_builder.CreateCall(m_globals.putchar, {load_data()}); }
 
   void loop(auto blk) {
-    m_ptr = m_builder->CreateCall(create_block_loop(m_globals, blk),
-                                  {m_data, m_ptr});
+    m_ptr = m_builder.CreateCall(create_block_loop(m_globals, blk),
+                                 {m_data, m_ptr});
   }
 
-  void create_icmp(llvm::BasicBlock *t, llvm::BasicBlock *f) const {
-    auto cmp = m_builder->CreateICmp(llvm::CmpInst::Predicate::ICMP_EQ,
-                                     load_data(), m_globals.zero);
-    m_builder->CreateCondBr(cmp, t, f);
+  void create_icmp(llvm::BasicBlock *t, llvm::BasicBlock *f) {
+    auto cmp = m_builder.CreateICmp(llvm::CmpInst::Predicate::ICMP_EQ,
+                                    load_data(), m_globals.zero);
+    m_builder.CreateCondBr(cmp, t, f);
   }
 
   [[nodiscard]] auto ptr() const { return m_ptr; }
+  [[nodiscard]] auto &builder() { return m_builder; }
 };
 
 static auto create_block_loop(const bf_globals &g, auto blk) {
@@ -79,30 +94,25 @@ static auto create_block_loop(const bf_globals &g, auto blk) {
   auto body = llvm::BasicBlock::Create(*g.ctx, "body", fn);
   auto exit = llvm::BasicBlock::Create(*g.ctx, "exit", fn);
 
-  llvm::IRBuilder<> builder{*g.ctx};
+  bf_ops e_ops{g, entry, data, ptr};
+  e_ops.create_icmp(exit, header);
 
-  builder.SetInsertPoint(entry);
-  bf_ops(&builder, g, data, ptr).create_icmp(exit, header);
+  bf_ops h_ops{g, header, data, ptr};
+  auto h_ptr = h_ops.builder().CreatePHI(g.i32, 2);
 
-  builder.SetInsertPoint(header);
-  auto h_ptr = builder.CreatePHI(g.i32, 2);
-
-  builder.SetInsertPoint(body);
-  bf_ops b_ops{&builder, g, data, h_ptr};
+  bf_ops b_ops{g, body, data, h_ptr};
   blk(b_ops);
-  builder.CreateBr(header);
+  b_ops.builder().CreateBr(header);
 
   h_ptr->addIncoming(ptr, entry);
   h_ptr->addIncoming(b_ops.ptr(), body);
+  h_ops.create_icmp(exit, body);
 
-  builder.SetInsertPoint(header);
-  bf_ops(&builder, g, data, ptr).create_icmp(exit, body);
-
-  builder.SetInsertPoint(exit);
-  auto x_phi = builder.CreatePHI(g.i32, 2);
+  bf_ops x_ops{g, exit, data, h_ptr};
+  auto x_phi = x_ops.builder().CreatePHI(g.i32, 2);
   x_phi->addIncoming(ptr, entry);
   x_phi->addIncoming(h_ptr, header);
-  builder.CreateRet(x_phi);
+  x_ops.builder().CreateRet(x_phi);
 
   return fn;
 }
@@ -110,7 +120,6 @@ static auto create_block_loop(const bf_globals &g, auto blk) {
 int main() {
   llvm::LLVMContext ctx;
   llvm::Module m{"brainf", ctx};
-  llvm::IRBuilder<> builder{ctx};
 
   // Handcrafted IR builder for this code from http://www.brainfuck.org/short.b:
   //
@@ -129,24 +138,20 @@ int main() {
   auto main_tp = llvm::FunctionType::get(i32, false);
   auto main = llvm::Function::Create(main_tp, llvm::Function::ExternalLinkage,
                                      "main", m);
-  builder.SetInsertPoint(llvm::BasicBlock::Create(ctx, "entry", main));
-
   auto data_tp = llvm::ArrayType::get(i32, max_elements_in_data);
-  auto data = builder.CreateAlloca(data_tp, nullptr, "data");
-  llvm::Value *ptr = zero;
 
-  auto data_init = llvm::ConstantAggregateZero::get(data_tp);
-  builder.CreateStore(data_init, data);
-
-  bf_globals g{.ctx = &ctx,
-               .mod = &m,
-               .i32 = i32,
-               .data_tp = data_tp,
-               .zero = zero,
-               .one = one,
-               .getchar = getchar,
-               .putchar = putchar};
-  bf_ops ops{&builder, g, data, zero};
+  bf_globals g{
+      .ctx = &ctx,
+      .mod = &m,
+      .i32 = i32,
+      .data_tp = data_tp,
+      .zero = zero,
+      .one = one,
+      .getchar = getchar,
+      .putchar = putchar,
+      .main = main,
+  };
+  bf_ops ops{g};
 
   // ++++
   for (auto i = 0; i < 4; i++) {
@@ -154,7 +159,7 @@ int main() {
   }
 
   // [>++++++++<-]
-  ops.loop([](bf_ops ops) {
+  ops.loop([](bf_ops &ops) {
     ops.inc();
     for (auto i = 0; i < 8; i++) {
       ops.plus();
@@ -164,11 +169,11 @@ int main() {
   });
 
   // ,
-  ops.store_data(builder.CreateCall(getchar));
+  ops.in();
 
   // [[>+.-<-]>.<,]
-  ops.loop([](bf_ops ops) {
-    ops.loop([](bf_ops ops) {
+  ops.loop([](bf_ops &ops) {
+    ops.loop([](bf_ops &ops) {
       // [>+.-<-]
       ops.inc();
       ops.plus();
@@ -185,7 +190,7 @@ int main() {
     ops.in();
   });
 
-  builder.CreateRet(zero);
+  ops.builder().CreateRet(zero);
 
   m.print(llvm::outs(), nullptr);
   return llvm::verifyModule(m, &llvm::errs()) ? 1 : 0;
