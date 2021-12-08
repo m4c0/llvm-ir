@@ -20,8 +20,6 @@ struct bf_globals {
   llvm::Function *main;
 };
 
-static auto create_block_loop(const bf_globals &g, auto blk);
-
 class bf_ops {
   bf_globals m_globals;
   llvm::IRBuilder<> m_builder;
@@ -34,6 +32,46 @@ class bf_ops {
     auto data_init = llvm::ConstantAggregateZero::get(g.data_tp);
     b->CreateStore(data_init, data);
     return data;
+  }
+
+  auto create_block_loop(auto blk) {
+    auto data_tp = m_globals.data_tp->getPointerTo();
+
+    // new_ptr = fn(data *, old_ptr)
+    auto fn_tp =
+        llvm::FunctionType::get(m_globals.i32, {data_tp, m_globals.i32}, false);
+    auto fn = llvm::Function::Create(fn_tp, llvm::Function::InternalLinkage, "",
+                                     m_globals.mod);
+
+    llvm::Value *data = fn->getArg(0);
+    llvm::Value *ptr = fn->getArg(1);
+
+    auto entry = llvm::BasicBlock::Create(*m_globals.ctx, "entry", fn);
+    auto header = llvm::BasicBlock::Create(*m_globals.ctx, "head", fn);
+    auto body = llvm::BasicBlock::Create(*m_globals.ctx, "body", fn);
+    auto exit = llvm::BasicBlock::Create(*m_globals.ctx, "exit", fn);
+
+    bf_ops e_ops{m_globals, entry, data, ptr};
+    e_ops.create_icmp(exit, header);
+
+    bf_ops h_ops{m_globals, header, data, ptr};
+    auto h_ptr = h_ops.builder().CreatePHI(m_globals.i32, 2);
+
+    bf_ops b_ops{m_globals, body, data, h_ptr};
+    blk(b_ops);
+    b_ops.builder().CreateBr(header);
+
+    h_ptr->addIncoming(ptr, entry);
+    h_ptr->addIncoming(b_ops.ptr(), body);
+    h_ops.create_icmp(exit, body);
+
+    bf_ops x_ops{m_globals, exit, data, h_ptr};
+    auto x_phi = x_ops.builder().CreatePHI(m_globals.i32, 2);
+    x_phi->addIncoming(ptr, entry);
+    x_phi->addIncoming(h_ptr, header);
+    x_ops.builder().CreateRet(x_phi);
+
+    return fn;
   }
 
 public:
@@ -64,8 +102,7 @@ public:
   void out() { m_builder.CreateCall(m_globals.putchar, {load_data()}); }
 
   void loop(auto blk) {
-    m_ptr = m_builder.CreateCall(create_block_loop(m_globals, blk),
-                                 {m_data, m_ptr});
+    m_ptr = m_builder.CreateCall(create_block_loop(blk), {m_data, m_ptr});
   }
 
   void create_icmp(llvm::BasicBlock *t, llvm::BasicBlock *f) {
@@ -74,48 +111,9 @@ public:
     m_builder.CreateCondBr(cmp, t, f);
   }
 
-  [[nodiscard]] auto ptr() const { return m_ptr; }
-  [[nodiscard]] auto &builder() { return m_builder; }
+  [[nodiscard]] llvm::Value *ptr() const { return m_ptr; }
+  [[nodiscard]] llvm::IRBuilder<> &builder() { return m_builder; }
 };
-
-static auto create_block_loop(const bf_globals &g, auto blk) {
-  auto data_tp = g.data_tp->getPointerTo();
-
-  // new_ptr = fn(data *, old_ptr)
-  auto fn_tp = llvm::FunctionType::get(g.i32, {data_tp, g.i32}, false);
-  auto fn =
-      llvm::Function::Create(fn_tp, llvm::Function::InternalLinkage, "", g.mod);
-
-  llvm::Value *data = fn->getArg(0);
-  llvm::Value *ptr = fn->getArg(1);
-
-  auto entry = llvm::BasicBlock::Create(*g.ctx, "entry", fn);
-  auto header = llvm::BasicBlock::Create(*g.ctx, "head", fn);
-  auto body = llvm::BasicBlock::Create(*g.ctx, "body", fn);
-  auto exit = llvm::BasicBlock::Create(*g.ctx, "exit", fn);
-
-  bf_ops e_ops{g, entry, data, ptr};
-  e_ops.create_icmp(exit, header);
-
-  bf_ops h_ops{g, header, data, ptr};
-  auto h_ptr = h_ops.builder().CreatePHI(g.i32, 2);
-
-  bf_ops b_ops{g, body, data, h_ptr};
-  blk(b_ops);
-  b_ops.builder().CreateBr(header);
-
-  h_ptr->addIncoming(ptr, entry);
-  h_ptr->addIncoming(b_ops.ptr(), body);
-  h_ops.create_icmp(exit, body);
-
-  bf_ops x_ops{g, exit, data, h_ptr};
-  auto x_phi = x_ops.builder().CreatePHI(g.i32, 2);
-  x_phi->addIncoming(ptr, entry);
-  x_phi->addIncoming(h_ptr, header);
-  x_ops.builder().CreateRet(x_phi);
-
-  return fn;
-}
 
 int main() {
   llvm::LLVMContext ctx;
