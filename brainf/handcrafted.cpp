@@ -54,34 +54,14 @@ public:
                                   {m_data, m_ptr});
   }
 
-  void create_ret() const { m_builder->CreateRet(m_ptr); }
   void create_icmp(llvm::BasicBlock *t, llvm::BasicBlock *f) const {
     auto cmp = m_builder->CreateICmp(llvm::CmpInst::Predicate::ICMP_EQ,
                                      load_data(), m_globals.zero);
     m_builder->CreateCondBr(cmp, t, f);
   }
+
+  [[nodiscard]] auto ptr() const { return m_ptr; }
 };
-
-static auto create_block(const bf_globals &g, auto blk) {
-  auto data_tp = g.data_tp->getPointerTo();
-
-  // new_ptr = fn(data *, old_ptr)
-  auto fn_tp = llvm::FunctionType::get(g.i32, {data_tp, g.i32}, false);
-  auto fn =
-      llvm::Function::Create(fn_tp, llvm::Function::InternalLinkage, "", g.mod);
-
-  llvm::Value *data = fn->getArg(0);
-  llvm::Value *ptr = fn->getArg(1);
-
-  llvm::IRBuilder<> builder{*g.ctx};
-  builder.SetInsertPoint(llvm::BasicBlock::Create(*g.ctx, "entry", fn));
-
-  const bf_ops ops{&builder, g, data, ptr};
-  blk(ops);
-  ops.create_ret();
-
-  return fn;
-}
 
 static auto create_block_loop(const bf_globals &g, auto blk) {
   auto data_tp = g.data_tp->getPointerTo();
@@ -108,11 +88,12 @@ static auto create_block_loop(const bf_globals &g, auto blk) {
   auto h_ptr = builder.CreatePHI(g.i32, 2);
 
   builder.SetInsertPoint(body);
-  auto b_ptr = builder.CreateCall(create_block(g, blk), {data, h_ptr});
+  bf_ops b_ops{&builder, g, data, h_ptr};
+  blk(b_ops);
   builder.CreateBr(header);
 
   h_ptr->addIncoming(ptr, entry);
-  h_ptr->addIncoming(b_ptr, body);
+  h_ptr->addIncoming(b_ops.ptr(), body);
 
   builder.SetInsertPoint(header);
   bf_ops(&builder, g, data, ptr).create_icmp(exit, body);

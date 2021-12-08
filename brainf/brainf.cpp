@@ -65,17 +65,10 @@ public:
 
 using rtype = void (builder::*)() noexcept;
 
-class meh {
-  builder *m_c;
-
-public:
-  constexpr meh(builder *c) : m_c(c) {}
-
-  constexpr meh operator+(rtype m) const noexcept {
-    (m_c->*m)();
-    return *this;
-  }
-};
+constexpr builder operator+(builder b, rtype m) noexcept {
+  (b.*m)();
+  return b;
+}
 
 namespace bf::parser {
 static constexpr const auto gt = match('<') & &builder::dec_ptr;
@@ -98,7 +91,7 @@ public:
 static constexpr const auto ops = gt | lt | plus | minus | dot | comma;
 
 static constexpr auto many_blocks(builder *c) {
-  return at_least_one(block{c}, meh{c});
+  return at_least_one(block{c}, *c);
 }
 
 static constexpr auto loop(builder *c) {
