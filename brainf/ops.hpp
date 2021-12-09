@@ -6,21 +6,22 @@ namespace bf {
 class ops {
   context m_globals;
   llvm::IRBuilder<> m_builder;
-  llvm::Value *m_data;
   llvm::Value *m_ptr;
 
 public:
-  ops(context g, llvm::BasicBlock *b, llvm::Value *d, llvm::Value *p)
-      : m_globals(g), m_builder(g.new_builder()), m_data(d), m_ptr(p) {
+  ops(context g, llvm::BasicBlock *b, llvm::Value *p)
+      : m_globals(g), m_builder(g.new_builder()), m_ptr(p) {
     m_builder.SetInsertPoint(b);
   }
 
   [[nodiscard]] auto load_data() {
-    auto gep = m_builder.CreateInBoundsGEP(m_data, {m_globals.zero(), m_ptr});
+    auto gep = m_builder.CreateInBoundsGEP(m_globals.data(),
+                                           {m_globals.zero(), m_ptr});
     return m_builder.CreateLoad(gep);
   }
   void store_data(auto v) {
-    auto gep = m_builder.CreateInBoundsGEP(m_data, {m_globals.zero(), m_ptr});
+    auto gep = m_builder.CreateInBoundsGEP(m_globals.data(),
+                                           {m_globals.zero(), m_ptr});
     m_builder.CreateStore(v, gep);
   }
 
@@ -36,39 +37,29 @@ public:
   void out() { m_builder.CreateCall(m_globals.putchar(), {load_data()}); }
 
   void loop(auto blk) {
-    auto fn = m_globals.create_block_function();
-    llvm::Value *data = fn->getArg(0);
-    llvm::Value *ptr = fn->getArg(1);
+    auto entry = m_builder.GetInsertBlock();
+    auto header = m_globals.create_basic_block("head");
+    auto body = m_globals.create_basic_block("body");
+    auto exit = m_globals.create_basic_block("exit");
 
-    auto entry = m_globals.create_basic_block("entry", fn);
-    auto header = m_globals.create_basic_block("head", fn);
-    auto body = m_globals.create_basic_block("body", fn);
-    auto exit = m_globals.create_basic_block("exit", fn);
+    m_builder.CreateBr(header);
 
-    ops e_ops{m_globals, entry, data, ptr};
-    e_ops.builder().CreateBr(header);
+    m_builder.SetInsertPoint(header);
+    auto h_ptr = m_builder.CreatePHI(m_globals.i32(), 2);
+    h_ptr->addIncoming(m_ptr, entry);
 
-    ops h_ops{m_globals, header, data, ptr};
-    auto h_ptr = h_ops.builder().CreatePHI(m_globals.i32(), 2);
+    m_ptr = h_ptr;
+    auto cmp = m_builder.CreateICmp(llvm::CmpInst::Predicate::ICMP_EQ,
+                                    load_data(), m_globals.zero());
+    m_builder.CreateCondBr(cmp, exit, body);
 
-    ops b_ops{m_globals, body, data, h_ptr};
+    ops b_ops{m_globals, body, h_ptr};
     blk(b_ops);
     b_ops.builder().CreateBr(header);
 
-    h_ptr->addIncoming(ptr, entry);
-    h_ptr->addIncoming(b_ops.ptr(), body);
-    h_ops.create_icmp(exit, body);
+    h_ptr->addIncoming(b_ops.ptr(), b_ops.builder().GetInsertBlock());
 
-    ops x_ops{m_globals, exit, data, h_ptr};
-    x_ops.builder().CreateRet(h_ptr);
-
-    m_ptr = m_builder.CreateCall(fn, {m_data, m_ptr});
-  }
-
-  void create_icmp(llvm::BasicBlock *t, llvm::BasicBlock *f) {
-    auto cmp = m_builder.CreateICmp(llvm::CmpInst::Predicate::ICMP_EQ,
-                                    load_data(), m_globals.zero());
-    m_builder.CreateCondBr(cmp, t, f);
+    m_builder.SetInsertPoint(exit);
   }
 
   [[nodiscard]] llvm::Value *ptr() const { return m_ptr; }
