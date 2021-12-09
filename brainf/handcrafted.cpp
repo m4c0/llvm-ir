@@ -1,24 +1,9 @@
 #include <iostream>
-#include <llvm/IR/IRBuilder.h>
-#include <llvm/IR/LLVMContext.h>
-#include <llvm/IR/Verifier.h>
 #include <string>
 
-static constexpr const auto max_elements_in_data = 30000;
+#include "globals.hpp"
 
-struct bf_globals {
-  llvm::LLVMContext *ctx;
-  llvm::Module *mod;
-
-  llvm::IntegerType *i32;
-  llvm::Type *data_tp;
-
-  llvm::Value *zero;
-  llvm::Value *one;
-  llvm::FunctionCallee getchar;
-  llvm::FunctionCallee putchar;
-  llvm::Function *main;
-};
+using bf_globals = bf::context;
 
 class bf_ops {
   bf_globals m_globals;
@@ -26,36 +11,25 @@ class bf_ops {
   llvm::Value *m_data;
   llvm::Value *m_ptr;
 
-  static auto create_data(bf_globals g, llvm::IRBuilder<> *b) {
-    b->SetInsertPoint(llvm::BasicBlock::Create(*g.ctx, "entry", g.main));
-    auto data = b->CreateAlloca(g.data_tp, nullptr, "data");
-    auto data_init = llvm::ConstantAggregateZero::get(g.data_tp);
-    b->CreateStore(data_init, data);
-    return data;
-  }
-
   auto create_block_loop(auto blk) {
-    auto data_tp = m_globals.data_tp->getPointerTo();
-
     // new_ptr = fn(data *, old_ptr)
-    auto fn_tp =
-        llvm::FunctionType::get(m_globals.i32, {data_tp, m_globals.i32}, false);
-    auto fn = llvm::Function::Create(fn_tp, llvm::Function::InternalLinkage, "",
-                                     m_globals.mod);
+    auto fn_tp = llvm::FunctionType::get(
+        m_globals.i32(), {m_globals.data_ptr_type(), m_globals.i32()}, false);
+    auto fn = m_globals.create_function(fn_tp);
 
     llvm::Value *data = fn->getArg(0);
     llvm::Value *ptr = fn->getArg(1);
 
-    auto entry = llvm::BasicBlock::Create(*m_globals.ctx, "entry", fn);
-    auto header = llvm::BasicBlock::Create(*m_globals.ctx, "head", fn);
-    auto body = llvm::BasicBlock::Create(*m_globals.ctx, "body", fn);
-    auto exit = llvm::BasicBlock::Create(*m_globals.ctx, "exit", fn);
+    auto entry = m_globals.create_basic_block("entry", fn);
+    auto header = m_globals.create_basic_block("head", fn);
+    auto body = m_globals.create_basic_block("body", fn);
+    auto exit = m_globals.create_basic_block("exit", fn);
 
     bf_ops e_ops{m_globals, entry, data, ptr};
     e_ops.create_icmp(exit, header);
 
     bf_ops h_ops{m_globals, header, data, ptr};
-    auto h_ptr = h_ops.builder().CreatePHI(m_globals.i32, 2);
+    auto h_ptr = h_ops.builder().CreatePHI(m_globals.i32(), 2);
 
     bf_ops b_ops{m_globals, body, data, h_ptr};
     blk(b_ops);
@@ -66,7 +40,7 @@ class bf_ops {
     h_ops.create_icmp(exit, body);
 
     bf_ops x_ops{m_globals, exit, data, h_ptr};
-    auto x_phi = x_ops.builder().CreatePHI(m_globals.i32, 2);
+    auto x_phi = x_ops.builder().CreatePHI(m_globals.i32(), 2);
     x_phi->addIncoming(ptr, entry);
     x_phi->addIncoming(h_ptr, header);
     x_ops.builder().CreateRet(x_phi);
@@ -75,31 +49,30 @@ class bf_ops {
   }
 
 public:
-  explicit bf_ops(bf_globals g)
-      : m_globals(g), m_builder(*g.ctx), m_data(create_data(g, &m_builder)),
-        m_ptr(g.zero) {}
   bf_ops(bf_globals g, llvm::BasicBlock *b, llvm::Value *d, llvm::Value *p)
-      : m_globals(g), m_builder(*g.ctx), m_data(d), m_ptr(p) {
+      : m_globals(g), m_builder(g.new_builder()), m_data(d), m_ptr(p) {
     m_builder.SetInsertPoint(b);
   }
 
   [[nodiscard]] auto load_data() {
-    auto gep = m_builder.CreateInBoundsGEP(m_data, {m_globals.zero, m_ptr});
+    auto gep = m_builder.CreateInBoundsGEP(m_data, {m_globals.zero(), m_ptr});
     return m_builder.CreateLoad(gep);
   }
   void store_data(auto v) {
-    auto gep = m_builder.CreateInBoundsGEP(m_data, {m_globals.zero, m_ptr});
+    auto gep = m_builder.CreateInBoundsGEP(m_data, {m_globals.zero(), m_ptr});
     m_builder.CreateStore(v, gep);
   }
 
-  void plus() { store_data(m_builder.CreateAdd(load_data(), m_globals.one)); }
-  void minus() { store_data(m_builder.CreateSub(load_data(), m_globals.one)); }
+  void plus() { store_data(m_builder.CreateAdd(load_data(), m_globals.one())); }
+  void minus() {
+    store_data(m_builder.CreateSub(load_data(), m_globals.one()));
+  }
 
-  void inc() { m_ptr = m_builder.CreateAdd(m_ptr, m_globals.one); }
-  void dec() { m_ptr = m_builder.CreateSub(m_ptr, m_globals.one); }
+  void inc() { m_ptr = m_builder.CreateAdd(m_ptr, m_globals.one()); }
+  void dec() { m_ptr = m_builder.CreateSub(m_ptr, m_globals.one()); }
 
-  void in() { store_data(m_builder.CreateCall(m_globals.getchar)); }
-  void out() { m_builder.CreateCall(m_globals.putchar, {load_data()}); }
+  void in() { store_data(m_builder.CreateCall(m_globals.getchar())); }
+  void out() { m_builder.CreateCall(m_globals.putchar(), {load_data()}); }
 
   void loop(auto blk) {
     m_ptr = m_builder.CreateCall(create_block_loop(blk), {m_data, m_ptr});
@@ -107,7 +80,7 @@ public:
 
   void create_icmp(llvm::BasicBlock *t, llvm::BasicBlock *f) {
     auto cmp = m_builder.CreateICmp(llvm::CmpInst::Predicate::ICMP_EQ,
-                                    load_data(), m_globals.zero);
+                                    load_data(), m_globals.zero());
     m_builder.CreateCondBr(cmp, t, f);
   }
 
@@ -117,7 +90,7 @@ public:
 
 int main() {
   llvm::LLVMContext ctx;
-  llvm::Module m{"brainf", ctx};
+  llvm::Module mod{"brainf", ctx};
 
   // Handcrafted IR builder for this code from http://www.brainfuck.org/short.b:
   //
@@ -125,32 +98,16 @@ int main() {
   // Show ASCII values of input in unary, separated by spaces.
   // (Useful for checking your implementation's newline behavior on input.)
 
-  auto i32 = llvm::Type::getInt32Ty(ctx);
+  bf_globals g{&ctx, &mod};
 
-  auto zero = llvm::ConstantInt::get(i32, 0);
-  auto one = llvm::ConstantInt::get(i32, 1);
-
-  auto getchar = m.getOrInsertFunction("getchar", i32);
-  auto putchar = m.getOrInsertFunction("putchar", i32, i32);
-
-  auto main_tp = llvm::FunctionType::get(i32, false);
+  auto main_tp = llvm::FunctionType::get(g.i32(), false);
   auto main = llvm::Function::Create(main_tp, llvm::Function::ExternalLinkage,
-                                     "main", m);
-  auto data_tp = llvm::ArrayType::get(i32, max_elements_in_data);
+                                     "main", mod);
 
-  bf_globals g{
-      .ctx = &ctx,
-      .mod = &m,
-      .i32 = i32,
-      .data_tp = data_tp,
-      .zero = zero,
-      .one = one,
-      .getchar = getchar,
-      .putchar = putchar,
-      .main = main,
-  };
-  bf_ops ops{g};
+  auto entry = g.create_basic_block("entry", main);
+  auto data = g.create_data(entry);
 
+  bf_ops ops{g, entry, data, g.zero()};
   // ++++
   for (auto i = 0; i < 4; i++) {
     ops.plus();
@@ -188,8 +145,8 @@ int main() {
     ops.in();
   });
 
-  ops.builder().CreateRet(zero);
+  ops.builder().CreateRet(g.zero());
 
-  m.print(llvm::outs(), nullptr);
-  return llvm::verifyModule(m, &llvm::errs()) ? 1 : 0;
+  mod.print(llvm::outs(), nullptr);
+  return llvm::verifyModule(mod, &llvm::errs()) ? 1 : 0;
 }
