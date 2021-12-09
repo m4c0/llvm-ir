@@ -19,11 +19,7 @@ int main() {
 
   bf_globals g{&ctx, &mod};
 
-  auto main = g.create_main_function();
-  auto entry = g.create_basic_block("entry", main);
-  auto data = g.create_data(entry);
-
-  bf_ops ops{g, entry, data, g.zero()};
+  bf_ops ops{g, g.main_entry(), g.zero()};
   // ++++
   for (auto i = 0; i < 4; i++) {
     ops.plus();
