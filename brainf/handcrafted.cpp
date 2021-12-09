@@ -11,12 +11,34 @@ class bf_ops {
   llvm::Value *m_data;
   llvm::Value *m_ptr;
 
-  auto create_block_loop(auto blk) {
-    // new_ptr = fn(data *, old_ptr)
-    auto fn_tp = llvm::FunctionType::get(
-        m_globals.i32(), {m_globals.data_ptr_type(), m_globals.i32()}, false);
-    auto fn = m_globals.create_function(fn_tp);
+public:
+  bf_ops(bf_globals g, llvm::BasicBlock *b, llvm::Value *d, llvm::Value *p)
+      : m_globals(g), m_builder(g.new_builder()), m_data(d), m_ptr(p) {
+    m_builder.SetInsertPoint(b);
+  }
 
+  [[nodiscard]] auto load_data() {
+    auto gep = m_builder.CreateInBoundsGEP(m_data, {m_globals.zero(), m_ptr});
+    return m_builder.CreateLoad(gep);
+  }
+  void store_data(auto v) {
+    auto gep = m_builder.CreateInBoundsGEP(m_data, {m_globals.zero(), m_ptr});
+    m_builder.CreateStore(v, gep);
+  }
+
+  void plus() { store_data(m_builder.CreateAdd(load_data(), m_globals.one())); }
+  void minus() {
+    store_data(m_builder.CreateSub(load_data(), m_globals.one()));
+  }
+
+  void inc() { m_ptr = m_builder.CreateAdd(m_ptr, m_globals.one()); }
+  void dec() { m_ptr = m_builder.CreateSub(m_ptr, m_globals.one()); }
+
+  void in() { store_data(m_builder.CreateCall(m_globals.getchar())); }
+  void out() { m_builder.CreateCall(m_globals.putchar(), {load_data()}); }
+
+  void loop(auto blk) {
+    auto fn = m_globals.create_block_function();
     llvm::Value *data = fn->getArg(0);
     llvm::Value *ptr = fn->getArg(1);
 
@@ -45,37 +67,7 @@ class bf_ops {
     x_phi->addIncoming(h_ptr, header);
     x_ops.builder().CreateRet(x_phi);
 
-    return fn;
-  }
-
-public:
-  bf_ops(bf_globals g, llvm::BasicBlock *b, llvm::Value *d, llvm::Value *p)
-      : m_globals(g), m_builder(g.new_builder()), m_data(d), m_ptr(p) {
-    m_builder.SetInsertPoint(b);
-  }
-
-  [[nodiscard]] auto load_data() {
-    auto gep = m_builder.CreateInBoundsGEP(m_data, {m_globals.zero(), m_ptr});
-    return m_builder.CreateLoad(gep);
-  }
-  void store_data(auto v) {
-    auto gep = m_builder.CreateInBoundsGEP(m_data, {m_globals.zero(), m_ptr});
-    m_builder.CreateStore(v, gep);
-  }
-
-  void plus() { store_data(m_builder.CreateAdd(load_data(), m_globals.one())); }
-  void minus() {
-    store_data(m_builder.CreateSub(load_data(), m_globals.one()));
-  }
-
-  void inc() { m_ptr = m_builder.CreateAdd(m_ptr, m_globals.one()); }
-  void dec() { m_ptr = m_builder.CreateSub(m_ptr, m_globals.one()); }
-
-  void in() { store_data(m_builder.CreateCall(m_globals.getchar())); }
-  void out() { m_builder.CreateCall(m_globals.putchar(), {load_data()}); }
-
-  void loop(auto blk) {
-    m_ptr = m_builder.CreateCall(create_block_loop(blk), {m_data, m_ptr});
+    m_ptr = m_builder.CreateCall(fn, {m_data, m_ptr});
   }
 
   void create_icmp(llvm::BasicBlock *t, llvm::BasicBlock *f) {
