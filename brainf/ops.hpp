@@ -46,7 +46,7 @@ public:
     auto exit = m_globals.create_basic_block("exit", fn);
 
     ops e_ops{m_globals, entry, data, ptr};
-    e_ops.create_icmp(exit, header);
+    e_ops.builder().CreateBr(header);
 
     ops h_ops{m_globals, header, data, ptr};
     auto h_ptr = h_ops.builder().CreatePHI(m_globals.i32(), 2);
@@ -60,10 +60,7 @@ public:
     h_ops.create_icmp(exit, body);
 
     ops x_ops{m_globals, exit, data, h_ptr};
-    auto x_phi = x_ops.builder().CreatePHI(m_globals.i32(), 2);
-    x_phi->addIncoming(ptr, entry);
-    x_phi->addIncoming(h_ptr, header);
-    x_ops.builder().CreateRet(x_phi);
+    x_ops.builder().CreateRet(h_ptr);
 
     m_ptr = m_builder.CreateCall(fn, {m_data, m_ptr});
   }
