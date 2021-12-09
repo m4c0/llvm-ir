@@ -46,6 +46,11 @@ public:
     return llvm::Function::Create(fn_tp, llvm::Function::InternalLinkage, "",
                                   m_mod);
   }
+  [[nodiscard]] auto create_main_function() const noexcept {
+    auto main_tp = llvm::FunctionType::get(m_i32, false);
+    return llvm::Function::Create(main_tp, llvm::Function::ExternalLinkage,
+                                  "main", m_mod);
+  }
 
   [[nodiscard]] auto i32() const noexcept { return m_i32; }
 
