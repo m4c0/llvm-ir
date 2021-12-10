@@ -1,6 +1,7 @@
 #pragma once
 
 #include "context.hpp"
+#include <memory>
 
 namespace bf {
 class ops {
@@ -37,7 +38,7 @@ public:
   void in() { store_data(m_builder.CreateCall(m_globals.getchar())); }
   void out() { m_builder.CreateCall(m_globals.putchar(), {load_data()}); }
 
-  void loop(auto blk) {
+  auto begin_loop() {
     auto entry = m_builder.GetInsertBlock();
     auto header = m_globals.create_basic_block("head");
 
@@ -57,12 +58,18 @@ public:
     m_builder.CreateCondBr(cmp, exit, body);
     m_builder.SetInsertPoint(exit);
 
-    ops b_ops{m_globals, body, header, m_ptr};
-    blk(b_ops);
+    return std::make_unique<ops>(m_globals, body, header, m_ptr);
+  }
+  void end_loop(auto &b_ops) {
     b_ops.finish();
 
     static_cast<llvm::PHINode *>(m_ptr)->addIncoming(
         b_ops.ptr(), b_ops.builder().GetInsertBlock());
+  }
+  void loop(auto blk) {
+    auto b_ops = begin_loop();
+    blk(*b_ops);
+    end_loop(*b_ops);
   }
 
   void finish() { m_builder.CreateBr(m_exit_block); }
