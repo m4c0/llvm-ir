@@ -6,11 +6,12 @@ namespace bf {
 class ops {
   context m_globals;
   llvm::IRBuilder<> m_builder;
+  llvm::BasicBlock *m_exit_block;
   llvm::Value *m_ptr;
 
 public:
-  ops(context g, llvm::BasicBlock *b, llvm::Value *p)
-      : m_globals(g), m_builder(g.new_builder()), m_ptr(p) {
+  ops(context g, llvm::BasicBlock *b, llvm::BasicBlock *x, llvm::Value *p)
+      : m_globals(g), m_builder(g.new_builder()), m_exit_block(x), m_ptr(p) {
     m_builder.SetInsertPoint(b);
   }
 
@@ -39,8 +40,6 @@ public:
   void loop(auto blk) {
     auto entry = m_builder.GetInsertBlock();
     auto header = m_globals.create_basic_block("head");
-    auto body = m_globals.create_basic_block("body");
-    auto exit = m_globals.create_basic_block("exit");
 
     m_builder.CreateBr(header);
 
@@ -49,18 +48,24 @@ public:
     h_ptr->addIncoming(m_ptr, entry);
 
     m_ptr = h_ptr;
+
+    auto body = m_globals.create_basic_block("body");
+    auto exit = m_globals.create_basic_block("exit");
+
     auto cmp = m_builder.CreateICmp(llvm::CmpInst::Predicate::ICMP_EQ,
                                     load_data(), m_globals.zero());
     m_builder.CreateCondBr(cmp, exit, body);
-
-    ops b_ops{m_globals, body, h_ptr};
-    blk(b_ops);
-    b_ops.builder().CreateBr(header);
-
-    h_ptr->addIncoming(b_ops.ptr(), b_ops.builder().GetInsertBlock());
-
     m_builder.SetInsertPoint(exit);
+
+    ops b_ops{m_globals, body, header, m_ptr};
+    blk(b_ops);
+    b_ops.finish();
+
+    static_cast<llvm::PHINode *>(m_ptr)->addIncoming(
+        b_ops.ptr(), b_ops.builder().GetInsertBlock());
   }
+
+  void finish() { m_builder.CreateBr(m_exit_block); }
 
   [[nodiscard]] llvm::Value *ptr() const { return m_ptr; }
   [[nodiscard]] llvm::IRBuilder<> &builder() { return m_builder; }

@@ -1,8 +1,8 @@
-#include <iostream>
-#include <string>
-
 #include "context.hpp"
 #include "ops.hpp"
+
+#include <iostream>
+#include <string>
 
 using bf_globals = bf::context;
 using bf_ops = bf::ops;
@@ -19,7 +19,7 @@ int main() {
 
   bf_globals g{&ctx, &mod};
 
-  bf_ops ops{g, g.main_entry(), g.zero()};
+  bf_ops ops{g, g.main_entry(), g.main_exit(), g.zero()};
   // ++++
   for (auto i = 0; i < 4; i++) {
     ops.plus();
@@ -57,8 +57,7 @@ int main() {
     ops.in();
   });
 
-  ops.builder().CreateRet(g.zero());
+  ops.finish();
 
-  mod.print(llvm::outs(), nullptr);
-  return llvm::verifyModule(mod, &llvm::errs()) ? 1 : 0;
+  return g.finish();
 }

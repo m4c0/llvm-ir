@@ -17,6 +17,7 @@ class context {
 
   llvm::Function *m_main;
   llvm::BasicBlock *m_main_entry;
+  llvm::BasicBlock *m_main_exit;
   llvm::Value *m_data;
 
   [[nodiscard]] auto create_data() {
@@ -45,7 +46,8 @@ public:
         m_main{llvm::Function::Create(llvm::FunctionType::get(m_i32, false),
                                       llvm::Function::ExternalLinkage, "main",
                                       m_mod)},
-        m_main_entry{create_basic_block("entry")}, m_data{create_data()} {}
+        m_main_entry{create_basic_block("entry")}, m_data{create_data()},
+        m_main_exit{create_basic_block("exit")} {}
 
   [[nodiscard]] llvm::BasicBlock *
   create_basic_block(const char *name) const noexcept {
@@ -61,10 +63,20 @@ public:
   [[nodiscard]] auto putchar() const noexcept { return m_putchar; }
 
   [[nodiscard]] auto main_entry() const noexcept { return m_main_entry; }
+  [[nodiscard]] auto main_exit() const noexcept { return m_main_exit; }
   [[nodiscard]] auto data() const noexcept { return m_data; }
 
   [[nodiscard]] llvm::IRBuilder<> new_builder() const noexcept {
     return llvm::IRBuilder<>{*m_ctx};
+  }
+
+  int finish() const noexcept {
+    llvm::IRBuilder<> builder{*m_ctx};
+    builder.SetInsertPoint(m_main_exit);
+    builder.CreateRet(m_zero);
+
+    m_mod->print(llvm::outs(), nullptr);
+    return llvm::verifyModule(*m_mod, &llvm::errs()) ? 1 : 0;
   }
 };
 } // namespace bf
