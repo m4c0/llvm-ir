@@ -17,13 +17,15 @@ public:
   }
 
   [[nodiscard]] auto load_data() {
-    auto gep = m_builder.CreateInBoundsGEP(m_globals.data(),
-                                           {m_globals.zero(), m_ptr});
-    return m_builder.CreateLoad(gep);
+    auto gep = m_builder.CreateInBoundsGEP(
+        m_globals.data()->getType()->getScalarType()->getPointerElementType(),
+        m_globals.data(), {m_globals.zero(), m_ptr});
+    return m_builder.CreateLoad(m_globals.i32(), gep);
   }
   void store_data(auto v) {
-    auto gep = m_builder.CreateInBoundsGEP(m_globals.data(),
-                                           {m_globals.zero(), m_ptr});
+    auto gep = m_builder.CreateInBoundsGEP(
+        m_globals.data()->getType()->getScalarType()->getPointerElementType(),
+        m_globals.data(), {m_globals.zero(), m_ptr});
     m_builder.CreateStore(v, gep);
   }
 

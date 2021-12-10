@@ -1,12 +1,12 @@
 #pragma once
+#include "globals.hpp"
 #include "llvm.hpp"
 
 namespace bf {
 class context {
   static constexpr const auto max_elements_in_data = 30000;
 
-  llvm::LLVMContext *m_ctx;
-  llvm::Module *m_mod;
+  globals *m_g;
 
   llvm::IntegerType *m_i32;
 
@@ -32,26 +32,26 @@ class context {
   }
 
 public:
-  context(llvm::LLVMContext *ctx, llvm::Module *mod)
-      : m_ctx{ctx}, m_mod{mod},
+  context(globals *g)
+      : m_g{g},
 
-        m_i32{llvm::Type::getInt32Ty(*m_ctx)},
+        m_i32{llvm::Type::getInt32Ty(g->context())},
 
         m_zero{llvm::ConstantInt::get(m_i32, 0)}, m_one{llvm::ConstantInt::get(
                                                       m_i32, 1)},
 
-        m_getchar{m_mod->getOrInsertFunction("getchar", m_i32)},
-        m_putchar{m_mod->getOrInsertFunction("putchar", m_i32, m_i32)},
+        m_getchar{g->mod().getOrInsertFunction("getchar", m_i32)},
+        m_putchar{g->mod().getOrInsertFunction("putchar", m_i32, m_i32)},
 
         m_main{llvm::Function::Create(llvm::FunctionType::get(m_i32, false),
                                       llvm::Function::ExternalLinkage, "main",
-                                      m_mod)},
+                                      g->mod())},
         m_main_entry{create_basic_block("entry")}, m_data{create_data()},
         m_main_exit{create_basic_block("exit")} {}
 
   [[nodiscard]] llvm::BasicBlock *
   create_basic_block(const char *name) const noexcept {
-    return llvm::BasicBlock::Create(*m_ctx, name, m_main);
+    return llvm::BasicBlock::Create(m_g->context(), name, m_main);
   }
 
   [[nodiscard]] auto i32() const noexcept { return m_i32; }
@@ -67,16 +67,14 @@ public:
   [[nodiscard]] auto data() const noexcept { return m_data; }
 
   [[nodiscard]] llvm::IRBuilder<> new_builder() const noexcept {
-    return llvm::IRBuilder<>{*m_ctx};
+    return llvm::IRBuilder<>{m_g->context()};
   }
 
-  int finish() const noexcept {
-    llvm::IRBuilder<> builder{*m_ctx};
+  void finish() const noexcept {
+    llvm::IRBuilder<> builder{m_g->context()};
     builder.SetInsertPoint(m_main_exit);
     builder.CreateRet(m_zero);
-
-    m_mod->print(llvm::outs(), nullptr);
-    return llvm::verifyModule(*m_mod, &llvm::errs()) ? 1 : 0;
+    m_g->optimise(*m_main);
   }
 };
 } // namespace bf
