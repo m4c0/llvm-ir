@@ -1,32 +1,30 @@
 #include "context.hpp"
+#include "globals.hpp"
 #include "ops.hpp"
 
 #include <iostream>
 #include <string>
 
-using bf_globals = bf::context;
-using bf_ops = bf::ops;
-
 int main() {
-  llvm::LLVMContext ctx;
-  llvm::Module mod{"brainf", ctx};
+  bf::globals g{"brainf"};
 
-  // Handcrafted IR builder for this code from http://www.brainfuck.org/short.b:
+  // Handcrafted IR builder for this code from
+  // http://www.brainfuck.org/short.b:
   //
   // ++++[>++++++++<-],[[>+.-<-]>.<,]
   // Show ASCII values of input in unary, separated by spaces.
   // (Useful for checking your implementation's newline behavior on input.)
 
-  bf_globals g{&ctx, &mod};
+  bf::context c{&g};
 
-  bf_ops ops{g, g.main_entry(), g.main_exit(), g.zero()};
+  bf::ops ops{c, c.main_entry(), c.main_exit(), c.zero()};
   // ++++
   for (auto i = 0; i < 4; i++) {
     ops.plus();
   }
 
   // [>++++++++<-]
-  ops.loop([](bf_ops &ops) {
+  ops.loop([](bf::ops &ops) {
     ops.inc();
     for (auto i = 0; i < 8; i++) {
       ops.plus();
@@ -39,8 +37,8 @@ int main() {
   ops.in();
 
   // [[>+.-<-]>.<,]
-  ops.loop([](bf_ops &ops) {
-    ops.loop([](bf_ops &ops) {
+  ops.loop([](bf::ops &ops) {
+    ops.loop([](bf::ops &ops) {
       // [>+.-<-]
       ops.inc();
       ops.plus();
@@ -58,6 +56,6 @@ int main() {
   });
 
   ops.finish();
-
+  c.finish();
   return g.finish();
 }

@@ -1,4 +1,5 @@
 #include "context.hpp"
+#include "globals.hpp"
 #include "ops.hpp"
 
 #include <fstream>
@@ -11,12 +12,10 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  llvm::LLVMContext ctx;
-  llvm::Module mod{"brainf", ctx};
-
-  bf::context g{&ctx, &mod};
+  bf::globals g{"brainf"};
+  bf::context c{&g};
   std::vector<std::unique_ptr<bf::ops>> stack{};
-  stack.emplace_back(new bf::ops{g, g.main_entry(), g.main_exit(), g.zero()});
+  stack.emplace_back(new bf::ops{c, c.main_entry(), c.main_exit(), c.zero()});
 
   auto f = std::fstream{argv[1]};
   while (f) {
@@ -55,5 +54,6 @@ int main(int argc, char **argv) {
   }
 
   stack.back()->finish();
+  c.finish();
   return g.finish();
 }
