@@ -60,7 +60,7 @@ public:
 
     return std::make_unique<ops>(m_globals, body, header, m_ptr);
   }
-  void end_loop(auto &b_ops) {
+  void end_loop(ops &b_ops) {
     b_ops.finish();
 
     static_cast<llvm::PHINode *>(m_ptr)->addIncoming(
