@@ -56,6 +56,5 @@ int main() {
   });
 
   ops.finish();
-  c.finish();
-  return g.finish();
+  return c.finish_and_run();
 }
