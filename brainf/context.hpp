@@ -70,11 +70,20 @@ public:
     return llvm::IRBuilder<>{m_g->context()};
   }
 
-  void finish() const noexcept {
+  [[nodiscard]] auto finish() const noexcept {
     llvm::IRBuilder<> builder{m_g->context()};
     builder.SetInsertPoint(m_main_exit);
     builder.CreateRet(m_zero);
     m_g->optimise(*m_main);
+    return m_g->finish();
+  }
+
+  [[nodiscard]] bool finish_and_run() const noexcept {
+    if (finish()) {
+      return true;
+    }
+    m_g->run("main");
+    return false;
   }
 };
 } // namespace bf
