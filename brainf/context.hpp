@@ -78,12 +78,11 @@ public:
     return m_g->finish();
   }
 
-  [[nodiscard]] bool finish_and_run() const noexcept {
+  [[nodiscard]] auto finish_and_run() const noexcept {
     if (finish()) {
       return true;
     }
-    m_g->run("main");
-    return false;
+    return static_cast<bool>(m_g->run(m_main));
   }
 };
 } // namespace bf
