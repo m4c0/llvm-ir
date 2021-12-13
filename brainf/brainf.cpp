@@ -6,18 +6,15 @@
 #include <iostream>
 #include <string>
 
-int main(int argc, char **argv) {
-  if (argc == 1) {
-    std::cerr << "Missing filename\n";
-    return 1;
-  }
+static llvm::cl::opt<std::string>
+    g_input_filename(llvm::cl::Positional, llvm::cl::desc("<input brainf>"));
 
+auto run(std::istream &f) {
   bf::globals g{"brainf"};
   bf::context c{&g};
   std::vector<std::unique_ptr<bf::ops>> stack{};
   stack.emplace_back(new bf::ops{c, c.main_entry(), c.main_exit(), c.zero()});
 
-  auto f = std::fstream{argv[1]};
   while (f) {
     auto chr = f.get();
     auto &ops = *stack.back();
@@ -55,4 +52,20 @@ int main(int argc, char **argv) {
 
   stack.back()->finish();
   return c.finish_and_run();
+}
+
+int main(int argc, char **argv) {
+  llvm::cl::ParseCommandLineOptions(argc, argv,
+                                    "BrainF compiler and interpreter\n");
+
+  if (g_input_filename == "") {
+    llvm::errs() << "Missing filename. Use --help to see options.\n";
+    return 1;
+  }
+
+  if (g_input_filename == "-") {
+    return run(std::cin);
+  }
+  std::fstream f{g_input_filename};
+  return run(f);
 }
