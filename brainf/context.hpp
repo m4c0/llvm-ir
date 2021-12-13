@@ -78,6 +78,13 @@ public:
     return m_g->finish();
   }
 
+  [[nodiscard]] auto finish_and_dump() const noexcept {
+    if (finish()) {
+      return true;
+    }
+    m_g->dump();
+    return false;
+  }
   [[nodiscard]] auto finish_and_run() const noexcept {
     if (finish()) {
       return true;

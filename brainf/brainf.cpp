@@ -9,6 +9,9 @@
 static llvm::cl::opt<std::string>
     g_input_filename(llvm::cl::Positional, llvm::cl::desc("<input brainf>"));
 
+static llvm::cl::opt<bool>
+    g_jit("jit", llvm::cl::desc("Run program with just-in-time compilation"));
+
 auto run(std::istream &f) {
   bf::globals g{"brainf"};
   bf::context c{&g};
@@ -51,7 +54,7 @@ auto run(std::istream &f) {
   }
 
   stack.back()->finish();
-  return c.finish_and_run();
+  return g_jit ? c.finish_and_run() : c.finish_and_dump();
 }
 
 int main(int argc, char **argv) {

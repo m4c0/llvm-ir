@@ -28,9 +28,9 @@ public:
 
   [[nodiscard]] bool finish() noexcept {
     m_mpm.run(*m_mod);
-    m_mod->print(llvm::outs(), nullptr);
     return llvm::verifyModule(*m_mod, &llvm::errs());
   }
+  void dump() noexcept { m_mod->print(llvm::outs(), nullptr); }
   auto run(llvm::Function *fn) noexcept {
     return jit(std::move(m_mod), fn, {});
   }
